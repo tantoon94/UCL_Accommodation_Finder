@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accommodation Finder</title>
+    <link rel="stylesheet" href="css/style2.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+
+<body>
+    <header class="main-header">
+        <div class="header-content">
+            <span class="ucl-title">UCL</span>
+            <span class="helper-title">Apartment Helper</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="search-section">
+            <div>
+                <label for="buildingsSelect">UCL building</label>
+                <select id="buildingsSelect">
+                    <option value="">Please select</option>
+                </select>
+            </div>
+            <div>
+                <label for="commuting-time">Commuting time</label>
+                <select id="commuting-time">
+                    <option value="10000">&gt;30 minutes</option>
+                    <option value="300">&lt;5 minutes</option>
+                    <option value="600">&lt;10 minutes</option>
+                    <option value="900">&lt;15 minutes</option>
+                    <option value="1200">&lt;20 minutes</option>
+                    <option value="1500">&lt;25 minutes</option>
+                    <option value="1800">&lt;30 minutes</option>
+                </select>
+            </div>
+            <!-- <button id="search-button">Search</button> -->
+        </div>
+
+        <div class="main-content">
+            <div class="map-section" id="map">
+                <!-- Google Map will be inserted here -->
+            </div>
+
+            <div class="sidebar">
+                <div class="info-section">
+                    <h5>Selected Building Info:</h5>
+                    <p>Building Name: <span id="origin"></span></p>
+                    <p>Address: <span id="originaddress"></span></p>
+                    <h5>Selected accommodation Info:</h5>
+                    <p>Accommodation Name: <span id="destination"></span></p>
+                    <p>Accommodation address: <span id="destinationaddress"></span></p>
+                    <p>Duration (in second): <span id="duration"></span></p>
+                    <p>Distance (in meter): <span id="distance"></span></p>
+                    <br />
+                    <p>Select a building and disired commuting time and hover over an accommodation on the map to view
+                        details.</p>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            Student housing information website:<br>
+            Student apartment reservation website:
+        </footer>
+    </div>
+
+    <!-- API? -->
+    <script>
+        let map;
+        let accmarkers = [];
+        let buildings;
+        let accommodations;
+        let selectedBuilding = undefined;
+        let selectedDuration = 10000;
+        let zoom = 12;
+        let buildingMarker;
+        const Info = {
+            origin: "",
+            destination: "",
+            originaddress: "",
+            destinationaddress: "",
+            duration: "",
+            distance: ""
+        }
+        let route;
+
+        $(document).ready(async function () {
+            //Set a function for change event of the commuting select control
+            $('#commuting-time').on('change', function () {
+                var index = $(this).prop('selectedIndex');
+                zoom = index === 0 ? 12 : 17 - index;
+                if (selectedBuilding) map.setZoom(zoom);
+            })
+            //By async method we make sure that the required script element for google is ready or we cannot make the markers
+            const googleReady = await AddGoogleScript();
+
+
+        }
+        );
+
+        async function AddGoogleScript() {
+            //Get google map key and add script referrence to the document body here when we are sure that we have all buildings
+            return await $.ajax({
+                url: `${window.location.origin}/getGoogleMapKey`,
+                method: 'GET',
+                success: (response) => {
+                    var googlMapUrl = `https://maps.googleapis.com/maps/api/js?key=${response}&callback=initMap&v=weekly&loading=async`;
+                    var script = document.createElement('script');
+                    script.src = googlMapUrl;
+                    script.type = 'text/javascript';
+                    script.async = true;
+                    script.defer = true;
+                    document.body.appendChild(script);
+                },
+                error: (error) => console.log('Error fetching google api key', error)
+            });
+        }
+
+        async function SetBuilding() {
+            console.log(buildings);
+            if (selectedBuilding != undefined) {
+                setMarker(selectedBuilding);
+                map.setCenter({ lat: selectedBuilding.location.x, lng: selectedBuilding.location.y });
+                map.setZoom(zoom);
+                Info.origin = selectedBuilding.display_name;
+                Info.originaddress = selectedBuilding.address;
+            }
+            else {
+                zoom = 12;
+                map.setCenter({ lat: 51.524559, lng: -0.13404 })
+                Info.origin = "";
+                Info.destinaon = "";
+                Info.originaddress = "";
+                Info.destinaonaddress = "";
+                Info.duration = "";
+                Info.distance = "";
+            }
+            ShowInfo();
+        }
+
+        function ShowInfo() {
+            $('#origin').text(Info.origin);
+            $('#originaddress').text(Info.originaddress);
+            $('#destination').text(Info.destination);
+            $('#destinationaddress').text(Info.destinationaddress);
+            $('#duration').text(Info.duration);
+            $('#distance').text(Info.distance);
+        }
+
+        function ShowRoute(accmarker) {
+            if (route) route.setMap(null);
+            acc = accmarker.accommodation;
+            Info.destination = acc.display_name;
+            Info.destinationaddress = acc.address;
+            $.ajax({
+                url: `${window.location.origin}/getwalkingrouteto/?buildingId=${selectedBuilding.gmap_id}&accommodationId=${acc.gmap_id}`,
+                method: 'GET',
+                success: (data) => {
+                    var thisroute = data[0];
+                    console.log(thisroute);
+                    if (thisroute) {
+                        const decodedPath = google.maps.geometry.encoding.decodePath(thisroute.encoded_polyline);
+                        route = new google.maps.Polyline({
+                            path: decodedPath,
+                            geodesic: true,
+                            strokeColor: "#FF0000",
+                            strokeOpacity: 1.0,
+                            strokeWeight: 2,
+                            map: map
+                        });
+                        Info.duration = thisroute.duration;
+                        Info.distance = thisroute.distance_meters;
+                    }
+                },
+                error: (error) => console.error(error)
+            })
+            ShowInfo();
+        }
+
+        // Initialize Google Map
+        async function initMap() {
+            const { Map } = await google.maps.importLibrary("maps");
+            map = new Map(document.getElementById("map"), {
+                center: { lat: 51.524559, lng: -0.13404 },
+                zoom: 12,
+                mapId: 'UCL-Accomm'
+            });
+            //Add all accommodations to the map with a marker
+            $.ajax({
+                url: `${window.location.origin}/uclaccommodations`,
+                method: 'GET',
+                success: async (data) => {
+                    accommodations = data;
+                    accommodations.forEach(acc => setMarker(acc));
+                    //Load buildings and add to select control now we are sure that we have all accommodations                  
+                    $.ajax({
+                        url: `${window.location.origin}/uclbuildings`,
+                        method: 'GET',
+                        success: (data) => {
+                            buildings = data;
+                            var $select = $('#buildingsSelect');
+                            $.each(data, function (index, place) {
+                                var $option = $('<option></option>').val(index).text(place.display_name);
+                                $select.append($option);
+                            });
+                            //Add a callback funtion to set the selected building
+                            $select.on('change', function () {
+                                selectedBuilding = buildings[$(this).val()];
+                                SetBuilding();
+                            })
+                        },
+                        error: (error) => {
+                            console.error('Error fetching options:', error);
+                        }
+                    });
+                },
+                error: (error) => {
+                    console.error('Error in fetching accommodations', error)
+                }
+            })
+        }
+
+        async function setMarker(place) {
+            const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+            const pin = new PinElement({
+                scale: place.type === 'Buildings' ? 1.5 : 1,
+                background: place.type === 'Buildings' ? "#0000FF" : "#FBBC04"
+            })
+            const marker = new AdvancedMarkerElement({
+                position: { lat: place.location.x, lng: place.location.y },
+                map,
+                title: `${place.display_name} , ${place.type}`,
+                content: pin.element,
+                gmpClickable: true,
+            });
+            if (place.type === 'Accommodation') {
+                const accmarker = { marker: marker, accommodation: place };
+                marker.addListener("click", () => {
+                    console.log("marker clicked")
+                    if (selectedBuilding) ShowRoute(accmarker)
+                });
+                accmarkers.push(accmarker);
+            }
+            else {
+                if (buildingMarker) buildingMarker.position = null;
+                buildingMarker = marker;
+            }
+        }
+    </script>
+</body>
+
+</html>
